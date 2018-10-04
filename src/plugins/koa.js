@@ -36,7 +36,7 @@ function createWrapUse (tracer, config) {
 function extractRoute (ctx) {
   if (ctx.matched) {
     ctx.matched
-      .filter(layer => layer.methods.length > 0)
+      .filter(layer => layer.path && layer.methods && layer.methods.length > 0)
       .forEach(layer => {
         web.enterRoute(ctx.req, layer.path)
       })
