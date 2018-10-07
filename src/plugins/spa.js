@@ -40,6 +40,7 @@ function createWrapHandle (tracer, config) {
 function createWrapProcessParams (tracer, config) {
   return function wrapProcessParams (processParams) {
     return function processParamsWithTrace (layer, called, req, res, done) {
+      console.info('spa processParamsWithTrace');
       const matchers = layer._datadog_matchers
 
       req = done ? req : called
@@ -56,6 +57,7 @@ function createWrapProcessParams (tracer, config) {
         }
       }
 
+      console.info('spa moving on');
       return processParams.apply(this, arguments)
     }
   }
