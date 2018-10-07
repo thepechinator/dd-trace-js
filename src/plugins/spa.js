@@ -17,7 +17,10 @@ function patch (http, methodName, tracer, config) {
       const options = args.options
       const callback = args.callback
 
-      if (uri === `${tracer._url.href}/v0.4/traces`) {
+      const route = findMatchingRoute(uri, config);
+
+      // Maybe ignore requests that don't match any of our patterns?
+      if (uri === `${tracer._url.href}/v0.4/traces` || !route) {
         return request.call(this, options, callback)
       }
 
@@ -37,7 +40,7 @@ function patch (http, methodName, tracer, config) {
           'service.name': getServiceName(tracer, config, options),
           // so we don't get a bunch of blank GET and POST names.
           // I like to see them broken up.
-          'resource.name': `${method} ${findMatchingRoute(uri, config)}`,
+          'resource.name': `${method} ${route}`,
           'span.type': 'web',
           'http.method': method,
           'http.url': uri
