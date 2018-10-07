@@ -148,6 +148,7 @@ function addResponseTags (req) {
   const res = req._datadog.res
   const config = req._datadog.config
 
+  console.info('config.findMatchingRoute', config.findMatchingRoute);
   if (config.findMatchingRoute) {
     console.info('looking for matching route!', req.url);
 
