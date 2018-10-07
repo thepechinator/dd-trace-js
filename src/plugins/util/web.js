@@ -150,7 +150,13 @@ function addResponseTags (req) {
 
   if (config.findMatchingRoute) {
     console.info('looking for matching route!', req.url);
-    resource = config.findMatchingRoute(req.url) || resource;
+
+    let route = config.findMatchingRoute(req.url);
+    if (route) {
+      console.info('found route', route);
+      resource = `${req.method} ${route}`;
+    }
+
     console.info('using resource value', resource);
   }
 
