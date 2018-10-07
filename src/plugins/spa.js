@@ -36,6 +36,7 @@ function createWrapHandle (tracer, config) {
   }
 }
 
+// we might have some control over what to track here...
 function createWrapProcessParams (tracer, config) {
   return function wrapProcessParams (processParams) {
     return function processParamsWithTrace (layer, called, req, res, done) {
@@ -47,6 +48,7 @@ function createWrapProcessParams (tracer, config) {
         // Try to guess which path actually matched
         for (let i = 0; i < matchers.length; i++) {
           if (matchers[i].test(layer.path)) {
+            console.info('spa:', 'matched layer.path', layer.path);
             web.enterRoute(req, matchers[i].path)
 
             break
