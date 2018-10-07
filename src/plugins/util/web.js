@@ -65,6 +65,8 @@ const web = {
 
   // Add a route segment that will be used for the resource name.
   enterRoute (req, path) {
+    // I think there is duplication here b/c the express plugin is also
+    // doing the same thing... so we get duplicate paths....
     req._datadog.paths.push(path)
   },
 
@@ -140,17 +142,17 @@ function addRequestTags (req) {
 }
 
 function addResponseTags (req) {
-  console.info('req._datadog.paths', req._datadog.paths)
-
   const path = req._datadog.paths.join('')
   let resource = [req.method].concat(path).filter(val => val).join(' ')
   const span = req._datadog.span
   const res = req._datadog.res
   const config = req._datadog.config
 
-  console.info('dd-trace-js web util req._datadog.config', config);
-  console.info('req.url is', req.url);
-  console.info('marking as resource', resource);
+  if (config.findMatchingRoute) {
+    console.info('looking for matching route!', req.url);
+    resource = config.findMatchingRoute(req.url) || resource;
+    console.info('using resource value', resource);
+  }
 
   span.addTags({
     // Leave it as the resource, unless we have a route helper

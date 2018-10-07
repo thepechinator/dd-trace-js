@@ -40,7 +40,6 @@ function createWrapHandle (tracer, config) {
 function createWrapProcessParams (tracer, config) {
   return function wrapProcessParams (processParams) {
     return function processParamsWithTrace (layer, called, req, res, done) {
-      console.info('spa processParamsWithTrace');
       const matchers = layer._datadog_matchers
 
       req = done ? req : called
@@ -49,7 +48,6 @@ function createWrapProcessParams (tracer, config) {
         // Try to guess which path actually matched
         for (let i = 0; i < matchers.length; i++) {
           if (matchers[i].test(layer.path)) {
-            console.info('spa:', 'matched layer.path', layer.path);
             web.enterRoute(req, matchers[i].path)
 
             break
