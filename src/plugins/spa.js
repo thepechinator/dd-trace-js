@@ -55,7 +55,6 @@ function createWrapProcessParams (tracer, config) {
         }
       }
 
-      console.info('spa moving on');
       return processParams.apply(this, arguments)
     }
   }
