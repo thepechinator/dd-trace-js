@@ -1,202 +1,158 @@
 'use strict'
 
-const url = require('url')
-const opentracing = require('opentracing')
-const semver = require('semver')
+const METHODS = require('methods').concat('use', 'route', 'param', 'all')
+const pathToRegExp = require('path-to-regexp')
+const web = require('./util/web')
 
-const Tags = opentracing.Tags
-const FORMAT_HTTP_HEADERS = opentracing.FORMAT_HTTP_HEADERS
+function createWrapMethod (tracer, config) {
+  config = web.normalizeConfig(config)
 
-function patch (http, methodName, tracer, config) {
-  this.wrap(http, methodName, fn => makeRequestTrace(fn))
+  function ddTrace (req, res, next) {
+    if (web.active(req)) return next()
 
-  function makeRequestTrace (request) {
-    return function requestTrace () {
-      const args = normalizeArgs.apply(null, arguments)
-      const uri = args.uri
-      const options = args.options
-      const callback = args.callback
+    web.instrument(tracer, config, req, res, 'spa.request')
 
-      const route = findMatchingRoute(uri, config);
-
-      // Maybe ignore requests that don't match any of our patterns?
-      if (uri === `${tracer._url.href}/v0.4/traces` || !route) {
-        return request.call(this, options, callback)
-      }
-
-      const method = (options.method || 'GET').toUpperCase()
-
-      const parentScope = tracer.scopeManager().active()
-      const parent = parentScope && parentScope.span()
-
-      // we need to figure out how to label the resource.name based on some
-      // routes we have... let's allow an optional function to be passed
-      // in that can help us determine that.
-
-      const span = tracer.startSpan('http.request', {
-        childOf: parent,
-        tags: {
-          [Tags.SPAN_KIND]: Tags.SPAN_KIND_RPC_CLIENT,
-          'service.name': getServiceName(tracer, config, options),
-          // so we don't get a bunch of blank GET and POST names.
-          // I like to see them broken up.
-          'resource.name': `${method} ${route}`,
-          'span.type': 'web',
-          'http.method': method,
-          'http.url': uri
-        }
-      })
-
-      if (!hasAmazonSignature(options)) {
-        tracer.inject(span, FORMAT_HTTP_HEADERS, options.headers)
-      }
-
-      const req = request.call(this, options, callback)
-
-      req.on('socket', () => {
-        // empty the data stream when no other listener exists to consume it
-        if (req.listenerCount('response') === 1) {
-          req.on('response', res => res.resume())
-        }
-      })
-
-      req.on('response', res => {
-        span.setTag(Tags.HTTP_STATUS_CODE, res.statusCode)
-
-        res.on('end', () => span.finish())
-      })
-
-      req.on('error', err => {
-        span.addTags({
-          'error.type': err.name,
-          'error.msg': err.message,
-          'error.stack': err.stack
-        })
-
-        span.finish()
-      })
-
-      return req
-    }
+    next()
   }
 
-  function extractUrl (options) {
-    const uri = options
-    const agent = options.agent || http.globalAgent
+  return function wrapMethod (original) {
+    return function methodWithTrace () {
+      if (!this._datadog_trace_patched && !this._router) {
+        this._datadog_trace_patched = true
+        this.use(ddTrace)
+      }
+      return original.apply(this, arguments)
+    }
+  }
+}
 
-    return typeof uri === 'string' ? uri : url.format({
-      protocol: options.protocol || agent.protocol,
-      hostname: options.hostname || options.host || 'localhost',
-      port: options.port,
-      pathname: options.path || options.pathname || '/'
+function createWrapHandle (tracer, config) {
+  return function wrapHandle (handle) {
+    return function handleWithTracer (req) {
+      web.patch(req)
+
+      return handle.apply(this, arguments)
+    }
+  }
+}
+
+function createWrapProcessParams (tracer, config) {
+  return function wrapProcessParams (processParams) {
+    return function processParamsWithTrace (layer, called, req, res, done) {
+      const matchers = layer._datadog_matchers
+
+      req = done ? req : called
+
+      if (matchers) {
+        // Try to guess which path actually matched
+        for (let i = 0; i < matchers.length; i++) {
+          if (matchers[i].test(layer.path)) {
+            web.enterRoute(req, matchers[i].path)
+
+            break
+          }
+        }
+      }
+
+      return processParams.apply(this, arguments)
+    }
+  }
+}
+
+function createWrapRouterMethod (tracer) {
+  return function wrapRouterMethod (original) {
+    return function methodWithTrace (fn) {
+      const offset = this.stack.length
+      const router = original.apply(this, arguments)
+      const matchers = extractMatchers(fn)
+
+      this.stack.slice(offset).forEach(layer => {
+        const handle = layer.handle
+
+        if (handle.length === 4) {
+          layer.handle = (error, req, res, next) => {
+            return handle.call(layer, error, req, res, wrapNext(tracer, layer, req, next))
+          }
+        } else {
+          layer.handle = (req, res, next) => {
+            return handle.call(layer, req, res, wrapNext(tracer, layer, req, next))
+          }
+        }
+
+        layer._datadog_matchers = matchers
+      })
+
+      return router
+    }
+  }
+}
+
+function wrapNext (tracer, layer, req, next) {
+  if (!web.active(req)) {
+    return next
+  }
+
+  const originalNext = next
+
+  web.reactivate(req)
+
+  return function (error) {
+    if (!error && layer.path && !isFastStar(layer)) {
+      web.exitRoute(req)
+    }
+
+    process.nextTick(() => {
+      originalNext.apply(null, arguments)
     })
   }
-
-  function normalizeArgs (inputURL, inputOptions, callback) {
-    let options = typeof inputURL === 'string' ? url.parse(inputURL) : Object.assign({}, inputURL)
-    options.headers = options.headers || {}
-    if (typeof inputOptions === 'function') {
-      callback = inputOptions
-    } else if (typeof inputOptions === 'object') {
-      options = Object.assign(options, inputOptions)
-    }
-    const uri = extractUrl(options)
-    return { uri, options, callback }
-  }
 }
 
-function getHost (options) {
-  if (typeof options === 'string') {
-    return url.parse(options).host
+function extractMatchers (fn) {
+  const arg = flatten([].concat(fn))
+
+  if (typeof arg[0] === 'function') {
+    return []
   }
 
-  const hostname = options.hostname || options.host || 'localhost'
-  const port = options.port
-
-  return [hostname, port].filter(val => val).join(':')
+  return arg.map(pattern => ({
+    path: pattern instanceof RegExp ? `(${pattern})` : pattern,
+    test: path => pathToRegExp(pattern).test(path)
+  }))
 }
 
-function getServiceName (tracer, config, options) {
-  if (config.splitByDomain) {
-    return getHost(options)
-  } else if (config.service) {
-    return config.service
+function isFastStar (layer) {
+  if (layer.regexp.fast_star !== undefined) {
+    return layer.regexp.fast_star
   }
 
-  return `${tracer._service}-spa`
+  return layer._datadog_matchers.some(matcher => matcher.path === '*')
 }
 
-function findMatchingRoute (uri, config) {
-  // if the function is defined, then do something
-  if (config.findMatchingRoute) {
-    return config.findMatchingRoute(uri);
-  }
-
-  // otherwise, do nothing
-  return uri;
+function flatten (arr) {
+  return arr.reduce((acc, val) => Array.isArray(val) ? acc.concat(flatten(val)) : acc.concat(val), [])
 }
 
-function hasAmazonSignature (options) {
-  if (!options) {
-    return false
-  }
-
-  if (options.headers) {
-    const headers = Object.keys(options.headers)
-      .reduce((prev, next) => Object.assign(prev, {
-        [next.toLowerCase()]: options.headers[next]
-      }), {})
-
-    if (headers['x-amz-signature']) {
-      return true
-    }
-
-    if ([].concat(headers['authorization']).some(startsWith('AWS4-HMAC-SHA256'))) {
-      return true
-    }
-  }
-
-  return options.path && options.path.toLowerCase().indexOf('x-amz-signature=') !== -1
+function patch (express, tracer, config) {
+  METHODS.forEach(method => {
+    this.wrap(express.application, method, createWrapMethod(tracer, config))
+  })
+  this.wrap(express.Router, 'handle', createWrapHandle(tracer, config))
+  this.wrap(express.Router, 'process_params', createWrapProcessParams(tracer, config))
+  this.wrap(express.Router, 'use', createWrapRouterMethod(tracer, config))
+  this.wrap(express.Router, 'route', createWrapRouterMethod(tracer, config))
 }
 
-function startsWith (searchString) {
-  return value => String(value).startsWith(searchString)
+function unpatch (express) {
+  METHODS.forEach(method => this.unwrap(express.application, method))
+  this.unwrap(express.Router, 'handle')
+  this.unwrap(express.Router, 'process_params')
+  this.unwrap(express.Router, 'use')
+  this.unwrap(express.Router, 'route')
 }
 
-function unpatch (http) {
-  this.unwrap(http, 'request')
-  this.unwrap(http, 'get')
+module.exports = {
+  name: 'express',
+  versions: ['4.x'],
+  patch,
+  unpatch
 }
-
-module.exports = [
-  {
-    name: 'http',
-    patch: function (http, tracer, config) {
-      patch.call(this, http, 'request', tracer, config)
-      if (semver.satisfies(process.version, '>=8')) {
-        /**
-         * In newer Node versions references internal to modules, such as `http(s).get` calling `http(s).request`, do
-         * not use externally patched versions, which is why we need to also patch `get` here separately.
-         */
-        patch.call(this, http, 'get', tracer, config)
-      }
-    },
-    unpatch
-  },
-  {
-    name: 'https',
-    patch: function (http, tracer, config) {
-      if (semver.satisfies(process.version, '>=9')) {
-        patch.call(this, http, 'request', tracer, config)
-        patch.call(this, http, 'get', tracer, config)
-      } else {
-        /**
-         * Below Node v9 the `https` module invokes `http.request`, which would end up counting requests twice.
-         * So rather then patch the `https` module, we ensure the `http` module is patched and we count only there.
-         */
-        require('http')
-      }
-    },
-    unpatch
-  }
-]

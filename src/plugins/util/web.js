@@ -128,6 +128,7 @@ function addRequestTags (req) {
   const url = `${protocol}://${req.headers['host']}${req.url}`
   const span = req._datadog.span
 
+  console.info('dd-trace-js web util url', url);
   span.addTags({
     [HTTP_URL]: url,
     [HTTP_METHOD]: req.method,
@@ -140,11 +141,17 @@ function addRequestTags (req) {
 
 function addResponseTags (req) {
   const path = req._datadog.paths.join('')
-  const resource = [req.method].concat(path).filter(val => val).join(' ')
+  let resource = [req.method].concat(path).filter(val => val).join(' ')
   const span = req._datadog.span
   const res = req._datadog.res
+  const config = req._datadog.config
+
+  console.info('dd-trace-js web util req._datadog.config', config);
+  console.info('path is', path);
 
   span.addTags({
+    // Leave it as the resource, unless we have a route helper
+    // to generate it.
     [RESOURCE_NAME]: resource,
     [HTTP_STATUS_CODE]: res.statusCode
   })
