@@ -30,9 +30,7 @@ function patch (http, methodName, tracer, config) {
         tags: {
           [Tags.SPAN_KIND]: Tags.SPAN_KIND_RPC_CLIENT,
           'service.name': getServiceName(tracer, config, options),
-          // so we don't get a bunch of blank GET and POST names.
-          // I like to see them broken up.
-          'resource.name': `${method} ${uri}`,
+          'resource.name': `${method}`,
           'span.type': 'web',
           'http.method': method,
           'http.url': uri
