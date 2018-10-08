@@ -130,7 +130,6 @@ function addRequestTags (req) {
   const url = `${protocol}://${req.headers['host']}${req.url}`
   const span = req._datadog.span
 
-  console.info('dd-trace-js web util url', url);
   span.addTags({
     [HTTP_URL]: url,
     [HTTP_METHOD]: req.method,
@@ -148,17 +147,11 @@ function addResponseTags (req) {
   const res = req._datadog.res
   const config = req._datadog.config
 
-  // console.info('config.findMatchingRoute', config.findMatchingRoute);
   if (config.findMatchingRoute) {
-    console.info('looking for matching route!', req.originalUrl);
-
     let route = config.findMatchingRoute(req.originalUrl);
     if (route) {
-      console.info('found route', route);
       resource = `${req.method} ${route}`;
     }
-
-    console.info('using resource value', resource);
   }
 
   span.addTags({

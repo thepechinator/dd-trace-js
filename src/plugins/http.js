@@ -17,8 +17,6 @@ function patch (http, methodName, tracer, config) {
       const options = args.options
       const callback = args.callback
 
-      console.info('http make request trace', uri);
-
       if (uri === `${tracer._url.href}/v0.4/traces`) {
         return request.call(this, options, callback)
       }

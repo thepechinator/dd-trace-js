@@ -6,7 +6,6 @@ const log = require('../log')
 function createWrapExecute (tracer, config, defaultFieldResolver, responsePathAsArray) {
   return function wrapExecute (execute) {
     return function executeWithTrace () {
-      console.info('graphql execute with trace');
       const args = normalizeArgs(arguments)
       const schema = args.schema
       const document = args.document
@@ -14,10 +13,8 @@ function createWrapExecute (tracer, config, defaultFieldResolver, responsePathAs
       const fieldResolver = args.fieldResolver || defaultFieldResolver
       const variableValues = args.variableValues
       const operation = getOperation(document)
-      console.info('document', document);
 
       if (!schema || !operation || typeof fieldResolver !== 'function') {
-        console.info('returning early');
         return execute.apply(this, arguments)
       }
 
@@ -35,7 +32,6 @@ function createWrapExecute (tracer, config, defaultFieldResolver, responsePathAs
       }
 
       if (!contextValue._datadog_spans) {
-        console.info('creating a span!');
         const parseTime = document._datadog_parse_time
         const validateTime = document._datadog_validate_time
 
@@ -67,7 +63,6 @@ function createWrapExecute (tracer, config, defaultFieldResolver, responsePathAs
         })
       }
 
-      console.info('finish the graphql operation');
       return call(execute, this, [args], err => finishOperation(contextValue, err))
     }
   }
