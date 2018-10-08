@@ -23,8 +23,6 @@ function patch (http, methodName, tracer, config) {
 
       const method = (options.method || 'GET').toUpperCase()
 
-      console.info('HTTP request trace for', uri);
-
       const parentScope = tracer.scopeManager().active()
       const parent = parentScope && parentScope.span()
       const span = tracer.startSpan('http.request', {
